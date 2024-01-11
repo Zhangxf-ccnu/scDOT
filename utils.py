@@ -8,8 +8,8 @@ def H(x):
     
     return output
 
-def pdconcat(x, y):
-        return pd.concat([x,y], join="outer")
+def pdconcat(x, y, join="outer"):
+        return pd.concat([x,y], join=join)
 
 def concatenate(x, y):
         return np.concatenate([x,y])
@@ -20,7 +20,7 @@ def vstack(x, y):
 def add(x, y):
     return x+y
 
-def pp(dat_list, hvg = True):
+def pp(dat_list, hvg = True, n_top_genes=5000):
     
     c = len(dat_list)
     
@@ -32,7 +32,7 @@ def pp(dat_list, hvg = True):
         sc.pp.normalize_total(adata, target_sum=1e4)
         sc.pp.log1p(adata)
         if hvg:
-            sc.pp.highly_variable_genes(adata, n_top_genes=5000)
+            sc.pp.highly_variable_genes(adata, n_top_genes=n_top_genes)
             adata = adata[:, adata.var.highly_variable]
         sc.pp.scale(adata)
         ref_dat_pp.append(adata.to_df())

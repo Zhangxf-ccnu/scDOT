@@ -2,13 +2,15 @@ import numpy as np
 import pandas as pd
 import functools
 from collections import Counter
-import scipy.spatial as sp
+from scipy.spatial import distance
+from concurrent.futures import ThreadPoolExecutor
 import math
 import ot
 from utils import pp, concatenate, find_index, vstack, cal_mmd, dist_ensemble, H
+import time
 
 
-def cal_ct_margin(ref_dat_list, ref_label_list, label_set, query_dat):
+def cal_ct_margin(ref_label_list, label_set):
 
     ct_margin = list()
     for r in range(len(ref_label_list)):
@@ -33,15 +35,15 @@ def cal_single_dist(ref_dat, ref_label, query_dat):
     ct_count = pd.DataFrame(Counter(ref_label).items())
     ct_count = ct_count.sort_values(by = 0)
     
+    def compute_distance(i):
+        id = np.where(ref_label == ct_count.iloc[i, 0])[0]
+        ct_feat = np.mean(np.array(ref_dat[id, :]), axis=0).reshape(1, ref_dat.shape[1])
+        return distance.cdist(query_dat, ct_feat, 'cosine').T
 
-    dist = list()
-    for i in range(ct_count.shape[0]):
-        id = np.where(ref_label == ct_count.iloc[i,0])[0]
-        ct_feat = np.mean(np.array(ref_dat[id,:]), axis = 0).reshape(1, ref_dat.shape[1])
-        dist.append(sp.distance.cdist(query_dat, ct_feat, 'cosine').T)
-            
-    dist = functools.reduce(concatenate, dist).T
-    
+    with ThreadPoolExecutor() as executor:
+        dist_list = list(executor.map(compute_distance, range(ct_count.shape[0])))
+
+    dist = np.vstack(dist_list).T
                 
     return dist
     
@@ -211,39 +213,41 @@ def scDOT(loc, ref_name, query_name, lambda1=0.01, lambda2=0.01, threshold=0.9):
     # 	m: 1D-array, metric for unseen cell-type identification.
     # 	'''
 
-    expression_s = list()
+    start_time = time.time()
+    expression = list()
     label_s = list()
     for i in ref_name:
         file_name = loc + "{}_cell.csv".format(i)
         a=pd.read_csv(file_name, header=0, index_col=0)
-        expression_s.append(a)
+        expression.append(a)
         file_name = loc + "{}_label.csv".format(i)
         a=pd.read_csv(file_name, header=0, index_col=0).iloc[:,0].values
         label_s.append(a)
-
     file_name = loc + "{}_cell.csv".format(query_name)
     expression_t=pd.read_csv(file_name, header=0, index_col=0)
+    expression.append(expression_t)
     del file_name,a,i
+    end_time = time.time()
+    time_used = end_time - start_time
+    print("Time for data loading is {}".format(time_used))
 
-    dat_list = expression_s.copy()
-    dat_list.append(expression_t)
-    dat_list_pp = pp(dat_list)
-    query_pp = dat_list_pp[-1]
-    dat_list_pp = dat_list_pp[0:-1]
-    del dat_list, expression_s
+    b_hat = np.array(np.sum(expression_t, axis = 1))/np.sum(np.sum(expression_t))
+
+    expression = pp(expression)
+    expression_t = expression[-1]
+    expression = expression[0:-1]
     
     label_set = functools.reduce(concatenate, label_s)
     label_set = sorted(np.unique(label_set))
-    a_hat = cal_ct_margin(dat_list_pp, label_s, label_set, query_pp)
-    b_hat = np.array(np.sum(expression_t, axis = 1))/np.sum(np.sum(expression_t))
+    a_hat = cal_ct_margin(label_s, label_set)
     
-    D = cal_multi_dist(dat_list_pp, label_s, label_set, query_pp)
-    D_inp, w_list = D_inpute_with_expr(Dist=D, label_set=np.array(label_set), dat_list=dat_list_pp, label_list=label_s)
-    D_inp = [np.array(ll) for ll in D_inp]
+    D = cal_multi_dist(expression, label_s, label_set, expression_t)
+    D, w_list = D_inpute_with_expr(Dist=D, label_set=np.array(label_set), dat_list=expression, label_list=label_s)
+    D = [np.array(ll) for ll in D]
     
-    w = np.full((len(D_inp), 1), 1/len(D_inp))
-    lambda3, w = init_solve(D_inp, b_hat, a_hat, w_piror=w, lambda1=lambda1, lambda2=lambda2)
-    x, w, y_hat = solve(D_inp, b_hat, a_hat, label_set, w_piror=w, lambda1=lambda1, lambda2=lambda2, beta=lambda3)
+    w = np.full((len(D), 1), 1/len(D))
+    lambda3, w = init_solve(D, b_hat, a_hat, w_piror=w, lambda1=lambda1, lambda2=lambda2)
+    x, w, y_hat = solve(D, b_hat, a_hat, label_set, w_piror=w, lambda1=lambda1, lambda2=lambda2, beta=lambda3)
     
     x = x / np.sum(x, axis=1, keepdims=True)
     score = np.max(x, axis=1)

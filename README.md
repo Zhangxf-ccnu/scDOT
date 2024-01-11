@@ -6,7 +6,7 @@ scDOT is designed for annotating newly sequenced (query) data with the assistanc
 
 ## System Requirements
 
-Python support packages: pandas, numpy, scanpy, scipy,ot
+Python support packages: pandas, numpy, scanpy, scipy, POT
 
 ## Versions the software has been tested on
 
